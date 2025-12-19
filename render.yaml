@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: auction-game-backend
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+
+  - type: static
+    name: auction-game-frontend
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    autoDeploy: true

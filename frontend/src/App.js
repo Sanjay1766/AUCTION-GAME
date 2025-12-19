@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("http://127.0.0.1:5000");
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://127.0.0.1:5000";
+const socket = io(SOCKET_URL);
 
 export default function App() {
   const [view, setView] = useState("HOME");
