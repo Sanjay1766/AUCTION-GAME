@@ -5,11 +5,23 @@ const cors = require("cors");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
-app.use(cors());
+
+// Configure CORS for production
+const allowedOrigins = process.env.FRONTEND_URL 
+  ? [process.env.FRONTEND_URL, "http://localhost:3000"]
+  : ["http://localhost:3000", "http://127.0.0.1:3000"];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" },
+  cors: { 
+    origin: allowedOrigins,
+    credentials: true
+  },
 });
 
 const rooms = {};
