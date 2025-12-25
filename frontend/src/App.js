@@ -268,60 +268,80 @@ export default function App() {
     }
     
     setImageLoading(true);
+    console.log(`\n🔍 Starting image fetch for: ${playerName}`);
     
-    // Try 1: Backend API proxy (best for CORS)
+    // Try 1: Try Wikipedia API through CORS proxy
     try {
-      const imageUrl = `${API_URL}/api/player-image?name=${encodeURIComponent(playerName)}`;
-      console.log(`🔍 Fetching image from backend: ${imageUrl}`);
+      const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(playerName)}`)}`;
+      console.log(`📡 Trying Wikipedia via CORS proxy...`);
       
-      const response = await fetch(imageUrl);
-      
+      const response = await fetch(corsProxyUrl);
       if (response.ok) {
         const data = await response.json();
-        if (data.imageUrl) {
-          console.log(`✅ Image found for ${playerName} from backend (source: ${data.source})`);
-          setPlayerImage(data.imageUrl);
-          setImageLoading(false);
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('⚠️ Backend image fetch failed, trying direct Wikipedia...', err.message);
-    }
-
-    // Try 2: Direct Wikipedia API as fallback
-    try {
-      const wikiResponse = await fetch(
-        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(playerName)}`
-      );
-      
-      if (wikiResponse.ok) {
-        const data = await wikiResponse.json();
         if (data.thumbnail?.source) {
-          console.log(`✅ Image found for ${playerName} from Wikipedia (direct)`);
+          console.log(`✅ SUCCESS: Image found for ${playerName} from Wikipedia`);
           setPlayerImage(data.thumbnail.source);
           setImageLoading(false);
           return;
         }
       }
     } catch (err) {
-      console.warn('⚠️ Wikipedia direct fetch failed...', err.message);
+      console.warn(`⚠️ Wikipedia CORS proxy failed:`, err.message);
     }
 
-    // Try 3: Wikimedia Commons as fallback
+    // Try 2: Direct Wikipedia (for local/CORS-enabled environments)
     try {
-      const wikiCommonsResponse = await fetch(
-        `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(playerName + " cricket")}&format=json&srnamespace=6&srlimit=1`
+      console.log(`📡 Trying direct Wikipedia API...`);
+      const wikiResponse = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(playerName)}`,
+        { mode: 'cors' }
       );
       
+      if (wikiResponse.ok) {
+        const data = await wikiResponse.json();
+        if (data.thumbnail?.source) {
+          console.log(`✅ SUCCESS: Image found for ${playerName} from Wikipedia (direct)`);
+          setPlayerImage(data.thumbnail.source);
+          setImageLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ Direct Wikipedia failed:`, err.message);
+    }
+
+    // Try 3: Backend API proxy
+    try {
+      console.log(`📡 Trying backend API proxy...`);
+      const imageUrl = `${API_URL}/api/player-image?name=${encodeURIComponent(playerName)}`;
+      
+      const response = await fetch(imageUrl);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.imageUrl) {
+          console.log(`✅ SUCCESS: Image found for ${playerName} from backend (source: ${data.source})`);
+          setPlayerImage(data.imageUrl);
+          setImageLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ Backend API failed:`, err.message);
+    }
+
+    // Try 4: Wikimedia Commons via CORS proxy
+    try {
+      console.log(`📡 Trying Wikimedia Commons via CORS proxy...`);
+      const wikiCommonsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(playerName + " cricket")}&format=json&srnamespace=6&srlimit=1`)}`;
+      
+      const wikiCommonsResponse = await fetch(wikiCommonsUrl);
       if (wikiCommonsResponse.ok) {
         const data = await wikiCommonsResponse.json();
         if (data.query?.search?.length > 0) {
           const fileTitle = data.query.search[0].title;
           
-          const fileInfoResponse = await fetch(
-            `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(fileTitle)}&prop=imageinfo&iiprop=url&format=json`
-          );
+          const fileInfoUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(fileTitle)}&prop=imageinfo&iiprop=url&format=json`)}`;
+          const fileInfoResponse = await fetch(fileInfoUrl);
           
           if (fileInfoResponse.ok) {
             const fileData = await fileInfoResponse.json();
@@ -330,7 +350,7 @@ export default function App() {
             
             if (pages[pageKey]?.imageinfo?.[0]?.url) {
               const imageUrl = pages[pageKey].imageinfo[0].url;
-              console.log(`✅ Image found for ${playerName} from Wikimedia Commons`);
+              console.log(`✅ SUCCESS: Image found for ${playerName} from Wikimedia Commons`);
               setPlayerImage(imageUrl);
               setImageLoading(false);
               return;
@@ -339,7 +359,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.warn('⚠️ Wikimedia Commons fetch failed...', err.message);
+      console.warn(`⚠️ Wikimedia Commons failed:`, err.message);
     }
 
     // Final fallback: Avatar with player initials
@@ -347,7 +367,8 @@ export default function App() {
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(playerName)}&size=400&background=${randomColor}&color=fff&bold=true&font-size=0.4`;
     
-    console.log(`⚠️ All image sources failed, using avatar fallback for ${playerName}`);
+    console.error(`❌ ALL IMAGE SOURCES FAILED for ${playerName}, using avatar fallback`);
+    console.log(`API_URL being used: ${API_URL}`);
     setPlayerImage(avatarUrl);
     setImageLoading(false);
   };
