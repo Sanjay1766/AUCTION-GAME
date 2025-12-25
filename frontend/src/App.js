@@ -3,6 +3,7 @@ import { io } from "socket.io-client";
 import "./App.css";
 
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://127.0.0.1:5000";
+const API_URL = process.env.REACT_APP_API_URL || process.env.REACT_APP_SOCKET_URL || "http://127.0.0.1:5000";
 const socket = io(SOCKET_URL);
 
 // Professional Sound Manager with Web Audio API
@@ -268,29 +269,85 @@ export default function App() {
     
     setImageLoading(true);
     
+    // Try 1: Backend API proxy (best for CORS)
     try {
-      // Use backend proxy to avoid CORS issues on live server
-      const response = await fetch(`${SOCKET_URL}/api/player-image?name=${encodeURIComponent(playerName)}`);
+      const imageUrl = `${API_URL}/api/player-image?name=${encodeURIComponent(playerName)}`;
+      console.log(`🔍 Fetching image from backend: ${imageUrl}`);
+      
+      const response = await fetch(imageUrl);
       
       if (response.ok) {
         const data = await response.json();
         if (data.imageUrl) {
-          console.log(`✅ Image found for ${playerName} (source: ${data.source})`);
+          console.log(`✅ Image found for ${playerName} from backend (source: ${data.source})`);
           setPlayerImage(data.imageUrl);
           setImageLoading(false);
           return;
         }
       }
     } catch (err) {
-      console.log('Backend image fetch failed:', err);
+      console.warn('⚠️ Backend image fetch failed, trying direct Wikipedia...', err.message);
     }
 
-    // Direct fallback if backend fails: Colorful avatar with player initials
+    // Try 2: Direct Wikipedia API as fallback
+    try {
+      const wikiResponse = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(playerName)}`
+      );
+      
+      if (wikiResponse.ok) {
+        const data = await wikiResponse.json();
+        if (data.thumbnail?.source) {
+          console.log(`✅ Image found for ${playerName} from Wikipedia (direct)`);
+          setPlayerImage(data.thumbnail.source);
+          setImageLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Wikipedia direct fetch failed...', err.message);
+    }
+
+    // Try 3: Wikimedia Commons as fallback
+    try {
+      const wikiCommonsResponse = await fetch(
+        `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(playerName + " cricket")}&format=json&srnamespace=6&srlimit=1`
+      );
+      
+      if (wikiCommonsResponse.ok) {
+        const data = await wikiCommonsResponse.json();
+        if (data.query?.search?.length > 0) {
+          const fileTitle = data.query.search[0].title;
+          
+          const fileInfoResponse = await fetch(
+            `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(fileTitle)}&prop=imageinfo&iiprop=url&format=json`
+          );
+          
+          if (fileInfoResponse.ok) {
+            const fileData = await fileInfoResponse.json();
+            const pages = fileData.query.pages;
+            const pageKey = Object.keys(pages)[0];
+            
+            if (pages[pageKey]?.imageinfo?.[0]?.url) {
+              const imageUrl = pages[pageKey].imageinfo[0].url;
+              console.log(`✅ Image found for ${playerName} from Wikimedia Commons`);
+              setPlayerImage(imageUrl);
+              setImageLoading(false);
+              return;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Wikimedia Commons fetch failed...', err.message);
+    }
+
+    // Final fallback: Avatar with player initials
     const colors = ['FF6B6B', '4ECDC4', '45B7D1', 'FFA07A', 'FFD700', '98D8C8', '7B68EE', 'FF69B4'];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(playerName)}&size=400&background=${randomColor}&color=fff&bold=true&font-size=0.4`;
     
-    console.log(`⚠️ Using avatar fallback for ${playerName}`);
+    console.log(`⚠️ All image sources failed, using avatar fallback for ${playerName}`);
     setPlayerImage(avatarUrl);
     setImageLoading(false);
   };
