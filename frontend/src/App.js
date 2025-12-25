@@ -268,96 +268,29 @@ export default function App() {
     
     setImageLoading(true);
     
-    // Method 1: Try Wikipedia API directly (most reliable for cricket players)
     try {
-      const response = await fetch(
-        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(playerName)}`
-      );
+      // Use backend proxy to avoid CORS issues on live server
+      const response = await fetch(`${SOCKET_URL}/api/player-image?name=${encodeURIComponent(playerName)}`);
       
       if (response.ok) {
         const data = await response.json();
-        if (data.thumbnail && data.thumbnail.source) {
-          console.log(`✅ Wikipedia image found for ${playerName}`);
-          setPlayerImage(data.thumbnail.source);
+        if (data.imageUrl) {
+          console.log(`✅ Image found for ${playerName} (source: ${data.source})`);
+          setPlayerImage(data.imageUrl);
           setImageLoading(false);
           return;
         }
       }
     } catch (err) {
-      console.log('Wikipedia API failed:', err);
+      console.log('Backend image fetch failed:', err);
     }
 
-    // Method 2: Try Wikimedia Commons for direct cricket player images
-    try {
-      const response = await fetch(
-        `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(playerName + " cricket")}&format=json&srnamespace=6&srlimit=1`
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.query?.search?.length > 0) {
-          const fileTitle = data.query.search[0].title;
-          
-          const fileResponse = await fetch(
-            `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(fileTitle)}&prop=imageinfo&iiprop=url&format=json`
-          );
-          
-          if (fileResponse.ok) {
-            const fileData = await fileResponse.json();
-            const pages = fileData.query.pages;
-            const pageKey = Object.keys(pages)[0];
-            
-            if (pages[pageKey]?.imageinfo?.[0]?.url) {
-              const imageUrl = pages[pageKey].imageinfo[0].url;
-              console.log(`✅ Wikimedia Commons image found for ${playerName}`);
-              setPlayerImage(imageUrl);
-              setImageLoading(false);
-              return;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.log('Wikimedia Commons failed:', err);
-    }
-
-    // Method 3: Unsplash API with free access key
-    try {
-      const response = await fetch(
-        `https://api.unsplash.com/search/photos?query=${encodeURIComponent(playerName + " cricket")}&client_id=tVd5F4NeHfLTVKBwj-rczKcb-pzJNxGcNmFrWMXZu64&per_page=1`
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.results?.length > 0) {
-          const imageUrl = data.results[0].urls.regular;
-          console.log(`✅ Unsplash image found for ${playerName}`);
-          setPlayerImage(imageUrl);
-          setImageLoading(false);
-          return;
-        }
-      }
-    } catch (err) {
-      console.log('Unsplash API failed:', err);
-    }
-
-    // Method 4: Google Images search (via placeholder service)
-    try {
-      const googleImageUrl = `https://www.bing.com/th?q=${encodeURIComponent(playerName + " cricket player")}&w=300&h=400`;
-      console.log(`🔍 Using Bing image search for ${playerName}`);
-      setPlayerImage(googleImageUrl);
-      setImageLoading(false);
-      return;
-    } catch (err) {
-      console.log('Bing image failed:', err);
-    }
-
-    // Final fallback: Colorful avatar with player initials
+    // Direct fallback if backend fails: Colorful avatar with player initials
     const colors = ['FF6B6B', '4ECDC4', '45B7D1', 'FFA07A', 'FFD700', '98D8C8', '7B68EE', 'FF69B4'];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(playerName)}&size=400&background=${randomColor}&color=fff&bold=true&font-size=0.4`;
     
-    console.log(`⚠️ All image APIs failed, using avatar fallback for ${playerName}`);
+    console.log(`⚠️ Using avatar fallback for ${playerName}`);
     setPlayerImage(avatarUrl);
     setImageLoading(false);
   };
