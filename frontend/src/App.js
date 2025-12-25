@@ -98,12 +98,96 @@ export default function App() {
   const [playerImage, setPlayerImage] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
   const [showPurchases, setShowPurchases] = useState(false);
+  const [playerMode, setPlayerMode] = useState(null); // null, "free", or "database"
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [playerPool, setPlayerPool] = useState([]); // Balanced, shuffled player pool
+  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
   const prevPriceRef = useRef(null);
 
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
   };
+
+  // Load players database on mount
+  useEffect(() => {
+    const loadPlayers = async () => {
+      try {
+        const response = await fetch('/players.json');
+        const data = await response.json();
+        setAllPlayers(data.players);
+      } catch (err) {
+        console.log('Error loading players:', err);
+      }
+    };
+    loadPlayers();
+  }, []);
+
+  // Create balanced player pool when database mode is selected
+  const createBalancedPlayerPool = () => {
+    // Group players by role
+    const batsmen = allPlayers.filter(p => p.role === 'Batsman');
+    const bowlers = allPlayers.filter(p => p.role === 'Bowler');
+    const allRounders = allPlayers.filter(p => p.role === 'All-Rounder');
+    const keepers = allPlayers.filter(p => p.role === 'Wicket-Keeper');
+
+    // Shuffle each group
+    const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
+    shuffle(batsmen);
+    shuffle(bowlers);
+    shuffle(allRounders);
+    shuffle(keepers);
+
+    // Interleave players for balanced distribution
+    const balanced = [];
+    const maxLength = Math.max(batsmen.length, bowlers.length, allRounders.length, keepers.length);
+    
+    for (let i = 0; i < maxLength; i++) {
+      if (i < batsmen.length) balanced.push(batsmen[i]);
+      if (i < bowlers.length) balanced.push(bowlers[i]);
+      if (i < allRounders.length) balanced.push(allRounders[i]);
+      if (i < keepers.length) balanced.push(keepers[i]);
+    }
+
+    setPlayerPool(balanced);
+    setCurrentPlayerIndex(0);
+    console.log('✅ Created balanced player pool with', balanced.length, 'players');
+    console.log('Distribution:', {
+      Batsmen: batsmen.length,
+      Bowlers: bowlers.length,
+      'All-Rounders': allRounders.length,
+      'Wicket-Keepers': keepers.length
+    });
+  };
+
+  // Get next player from balanced pool
+  const getNextPlayer = () => {
+    if (currentPlayerIndex >= playerPool.length) {
+      showNotification('All players have been auctioned!', 'info');
+      return null;
+    }
+    const nextPlayer = playerPool[currentPlayerIndex];
+    setCurrentPlayerIndex(prev => prev + 1);
+    return nextPlayer;
+  };
+
+  // Auto-load first player after room opens (database mode)
+  useEffect(() => {
+    if (
+      playerMode === 'database' &&
+      isAuctioneer &&
+      view === 'AUCTION' &&
+      playerPool.length > 0 &&
+      currentPlayerIndex === 0 &&
+      !player
+    ) {
+      const firstPlayer = playerPool[0];
+      setPlayer(firstPlayer.name);
+      setCurrentPlayerIndex(1);
+      fetchPlayerImage(firstPlayer.name);
+      console.log('✅ Auto-loaded first player (guard):', firstPlayer.name, '-', firstPlayer.role);
+    }
+  }, [playerMode, isAuctioneer, view, playerPool, currentPlayerIndex, player]);
 
   useEffect(() => {
     socket.off();
@@ -114,6 +198,15 @@ export default function App() {
       setView("AUCTION");
       playSound('start');
       showNotification(`Room created! ID: ${id}`, 'success');
+      
+      // Auto-load first player in database mode
+      if (playerMode === "database" && playerPool.length > 0) {
+        const firstPlayer = playerPool[0];
+        setPlayer(firstPlayer.name);
+        setCurrentPlayerIndex(1);
+        fetchPlayerImage(firstPlayer.name);
+        console.log('✅ Auto-loaded first player:', firstPlayer.name, '-', firstPlayer.role);
+      }
     });
 
     socket.on("update", (data) => {
@@ -138,6 +231,21 @@ export default function App() {
       setShowConfetti(true);
       showNotification(msg, 'success');
       setTimeout(() => setShowConfetti(false), 4000);
+      
+      // Auto-load next player in database mode after auction completes
+      if (playerMode === "database" && isAuctioneer) {
+        setTimeout(() => {
+          if (currentPlayerIndex >= playerPool.length) {
+            showNotification('All players have been auctioned!', 'info');
+            return;
+          }
+          const nextPlayer = playerPool[currentPlayerIndex];
+          setCurrentPlayerIndex(prev => prev + 1);
+          setPlayer(nextPlayer.name);
+          fetchPlayerImage(nextPlayer.name);
+          console.log('✅ Auto-loaded next player:', nextPlayer.name, '-', nextPlayer.role);
+        }, 2000); // Wait 2 seconds after sold animation
+      }
     });
     
     socket.on("error", (msg) => {
@@ -146,7 +254,8 @@ export default function App() {
     });
 
     return () => socket.off();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerMode, isAuctioneer, playerPool, currentPlayerIndex]);
 
   const baseToCr = () =>
     currency === "Lakh" ? Number(base) / 100 : Number(base);
@@ -270,12 +379,14 @@ export default function App() {
           }}>🏏</div>
           <PrimaryButton onClick={() => {
             setView("CREATE");
+            setPlayerMode(null);
             playSound('notify');
           }}>
             CREATE TEAM (Auctioneer)
           </PrimaryButton>
           <PrimaryButton onClick={() => {
             setView("JOIN");
+            setPlayerMode(null);
             playSound('notify');
           }}>
             JOIN USING ROOM ID
@@ -284,8 +395,51 @@ export default function App() {
       </Page>
     );
 
+  /* MODE SELECTION (for choosing between free entry or database) */
+  if (view === "CREATE" && playerMode === null)
+    return (
+      <Page title="Choose Player Entry Mode">
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "20px",
+          marginTop: "50px"
+        }}>
+          <div style={{
+            fontSize: "16px",
+            color: "#475569",
+            marginBottom: "20px",
+            textAlign: "center"
+          }}>
+            How would you like to add players?
+          </div>
+          <PrimaryButton onClick={() => {
+            setPlayerMode("free");
+            playSound('notify');
+          }}>
+            📝 FREE ENTRY (Type Any Player Name)
+          </PrimaryButton>
+          <PrimaryButton onClick={() => {
+            setPlayerMode("database");
+            playSound('notify');
+          }}>
+            ⭐ DATABASE (Choose From Popular Players)
+          </PrimaryButton>
+          <div style={{ marginTop: "10px" }}>
+            <PrimaryButton onClick={() => {
+              setView("HOME");
+              playSound('notify');
+            }} style={{ background: "rgba(148, 163, 184, 0.5)" }}>
+              ← BACK
+            </PrimaryButton>
+          </div>
+        </div>
+      </Page>
+    );
+
   /* CREATE */
-  if (view === "CREATE")
+  if (view === "CREATE" && playerMode !== null)
     return (
       <Page title="Create Auction Room">
         <div style={{
@@ -303,6 +457,12 @@ export default function App() {
                 playSound('error');
                 return;
               }
+              
+              // If database mode, create balanced player pool
+              if (playerMode === "database") {
+                createBalancedPlayerPool();
+              }
+              
               socket.emit("create-room", { auctioneer: name });
             }}
           >
@@ -345,18 +505,52 @@ export default function App() {
       
       {isAuctioneer && (
         <Card highlight>
-          <h3 style={{ marginTop: 0, marginBottom: "20px", textAlign: "center" }}>🎯 Start New Auction</h3>
+          <h3 style={{ marginTop: 0, marginBottom: "20px", textAlign: "center" }}>
+            {playerMode === "database" ? "🎯 Current Player (Auto-Presented)" : "🎯 Start New Auction"}
+          </h3>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-            <Input
-              value={player}
-              onChange={(val) => {
-                setPlayer(val);
-                if (val.trim().length > 2) {
-                  fetchPlayerImage(val);
-                }
-              }}
-              placeholder="Player Name"
-            />
+            {playerMode === "free" ? (
+              // FREE ENTRY MODE - Manual input
+              <Input
+                value={player}
+                onChange={(val) => {
+                  setPlayer(val);
+                  if (val.trim().length > 2) {
+                    fetchPlayerImage(val);
+                  }
+                }}
+                placeholder="Enter Any Player Name"
+              />
+            ) : (
+              // DATABASE MODE - Auto-present player
+              <div style={{
+                width: "100%",
+                maxWidth: "400px",
+                padding: "20px",
+                background: "rgba(59, 130, 246, 0.05)",
+                borderRadius: "10px",
+                border: "2px dashed rgba(59, 130, 246, 0.3)",
+                textAlign: "center"
+              }}>
+                {player ? (
+                  <div>
+                    <div style={{ fontSize: "24px", fontWeight: "bold", color: "#1e293b", marginBottom: "5px" }}>
+                      {player}
+                    </div>
+                    <div style={{ fontSize: "14px", color: "#64748b", marginBottom: "10px" }}>
+                      {playerPool[currentPlayerIndex - 1]?.role || "Unknown Role"}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ color: "#64748b", fontSize: "14px" }}>
+                    Loading first player...
+                  </div>
+                )}
+                <div style={{ marginTop: "15px", fontSize: "12px", color: "#94a3b8" }}>
+                  {currentPlayerIndex} / {playerPool.length} players presented
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", gap: "10px", width: "100%", maxWidth: "400px" }}>
               <Input
                 value={base}
@@ -427,6 +621,35 @@ export default function App() {
 
             <PrimaryButton
               onClick={() => {
+                // DATABASE MODE: Player is already loaded, just start auction
+                if (playerMode === "database") {
+                  if (!player.trim()) {
+                    showNotification("No player loaded!", "error");
+                    playSound('error');
+                    return;
+                  }
+                  
+                  if (!base) {
+                    showNotification("Please enter base price", "error");
+                    playSound('error');
+                    return;
+                  }
+                  
+                  playSound('start');
+                  const imageUrl = playerImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(player)}&size=400&background=3b82f6&color=fff&bold=true`;
+                  socket.emit("new-player", {
+                    roomId,
+                    name: player,
+                    startingPrice: baseToCr(),
+                    image: imageUrl,
+                  });
+                  setBase("");
+                  setPlayerImage("");
+                  // Player will be auto-loaded after auction completes via 'sold' event
+                  return;
+                }
+                
+                // FREE MODE: Validate manual input
                 if (!player.trim() || !base) {
                   showNotification("Please enter player name and base price", "error");
                   playSound('error');
@@ -445,7 +668,7 @@ export default function App() {
                 setPlayerImage("");
               }}
             >
-              START AUCTION
+              {playerMode === "database" ? "START AUCTION" : "START AUCTION"}
             </PrimaryButton>
           </div>
         </Card>
